@@ -155,20 +155,120 @@ to collect-msg-update-intentions-unit
    let msg 0
    let performative 0
 
+   let requests []
+
+   let busy-ambos []
+
+   let bids []
+   let bid-items []
+   let highest-bids []
+   let highest-bidders []
+
    while [not empty? incoming-queue]
    [
      set msg get-message
      set performative get-performative msg
      if performative = "request" [
-       add-belief get-content msg
-       set intentions []
+       set requests lput msg requests
+;       add-belief get-content msg
+;       set intentions []
      ]
      if performative = "saved" [
        remove-belief get-content msg
        set intentions []
      ]
+     if performative = "bid" [
+       set bids lput msg bids
+     ]
+     if performative = "saving" [
+       set busy-ambos lput get-sender msg busy-ambos
+     ]
+   ]
+   show ""
+   ;show bid-items
+   ;show highest-bids
+   ;show highest-bidders
+   ;show ""
+
+   foreach bids [
+     let bid ?
+     let content get-content bid
+     let bid-item first content
+     let bid-item-pos position bid-item bid-items
+     let sender get-sender bid
+
+     if not member? sender busy-ambos [
+       ifelse bid-item-pos = false [
+         set bid-items lput bid-item bid-items
+         set bid-item-pos (length bid-items) - 1
+
+         set highest-bids lput (list item 1 content) highest-bids
+         set highest-bidders lput (list sender) highest-bidders
+       ] [
+         let currAuction item bid-item-pos highest-bids
+         let currBuyers item bid-item-pos highest-bidders
+         let bidVal (item 1 content)
+
+         let i 0
+         while [i < length currAuction] [
+           ifelse bidVal < item i currAuction [
+             let firstPart sublist currAuction 0 i
+             let secondPart sublist currAuction i length currAuction
+
+             set currAuction (sentence (sentence firstPart bidVal) secondPart)
+
+             set firstPart sublist currBuyers 0 i
+             set secondPart sublist currBuyers i length currBuyers;
+
+             set currBuyers (sentence (sentence firstPart sender) secondPart)
+
+             set highest-bids replace-item bid-item-pos highest-bids currAuction
+             set highest-bidders replace-item bid-item-pos highest-bidders currBuyers
+
+             set i length currAuction
+           ] [ set i i + 1 ]
+         ]
+         show highest-bids
+         show highest-bidders
+
+         ;if item bid-item-pos highest-bids > item 1 content [
+          ; set highest-bids replace-item bid-item-pos highest-bids (item 1 content)
+          ; set highest-bidders replace-item bid-item-pos highest-bidders sender
+         ;]
+       ]
+     ]
    ]
 
+   ; CHECK IF IT IS EVEN TIME TO BID YET (Only bid when you receive your own bid)
+
+   let counter 0
+   let temp-highest-bidders highest-bidders
+   while [counter < length temp-highest-bidders] [
+
+
+     let currItem item counter temp-highest-bidders; highest-bidders highest
+     if currItem != false [
+
+       let bids-won []
+
+       let currIndex counter
+
+       while [currIndex != false][
+         set bids-won lput currIndex bids-won
+         set temp-highest-bidders replace-item currIndex temp-highest-bidders false
+         set currIndex position currItem temp-highest-bidders
+       ]
+       show currItem
+       show bids-won
+
+     ]
+     set counter counter + 1
+
+   ]
+
+   foreach requests [
+     broadcast-to ambulances add-content (list get-content ? distance-coords item 1 get-content ?) create-message "bid"
+   ]
 
    if exist-beliefs-of-type "collect" and empty? intentions [
        let bel closer beliefs-of-type "collect"
