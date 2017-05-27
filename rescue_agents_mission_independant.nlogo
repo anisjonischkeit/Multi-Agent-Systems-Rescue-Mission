@@ -152,132 +152,140 @@ end
 
 ;;; Ambulance unit proactive behaviour
 to collect-msg-update-intentions-unit
+   show "!-------------------"
    let msg 0
    let performative 0
 
    let requests []
 
-   let busy-ambos []
+   let attendedTasks []
+   let firstAttendedTasks []
 
    let bids []
    let bid-items []
    let highest-bids []
    let highest-bidders []
 
+   let bidItem false
+   let bidVal false
+
    while [not empty? incoming-queue]
    [
      set msg get-message
      set performative get-performative msg
      if performative = "request" [
-       set requests lput msg requests
-;       add-belief get-content msg
+;       set requests lput msg requests
+       add-belief get-content msg
 ;       set intentions []
      ]
      if performative = "saved" [
        remove-belief get-content msg
-       set intentions []
+       ;set intentions []
      ]
      if performative = "bid" [
        set bids lput msg bids
+
+       if get-sender msg = (word who) [
+         set bidItem first get-content msg
+         set bidVal item 1 get-content msg
+       ]
      ]
      if performative = "saving" [
-       set busy-ambos lput get-sender msg busy-ambos
+       set attendedTasks lput get-content msg attendedTasks
+       set firstAttendedTasks lput get-content msg firstAttendedTasks
+     ]
+     if performative = "second-saving" [
+       set attendedTasks lput get-content msg attendedTasks
      ]
    ]
-   show ""
-   ;show bid-items
-   ;show highest-bids
-   ;show highest-bidders
-   ;show ""
 
-   foreach bids [
-     let bid ?
-     let content get-content bid
-     let bid-item first content
-     let bid-item-pos position bid-item bid-items
-     let sender get-sender bid
+   foreach firstAttendedTasks [
+     send add-receiver who add-content ? create-message "second-saving"
+   ]
 
-     if not member? sender busy-ambos [
+   show bids
+
+   ifelse bidItem != false [
+     foreach bids [
+       let bid ?
+
+       let content get-content bid
+       let bid-item first content
+       let bid-item-pos position bid-item bid-items
+       let sender get-sender bid
+
        ifelse bid-item-pos = false [
          set bid-items lput bid-item bid-items
          set bid-item-pos (length bid-items) - 1
 
-         set highest-bids lput (list item 1 content) highest-bids
-         set highest-bidders lput (list sender) highest-bidders
+         set highest-bids lput item 1 content highest-bids
+         set highest-bidders lput sender highest-bidders
        ] [
-         let currAuction item bid-item-pos highest-bids
-         let currBuyers item bid-item-pos highest-bidders
-         let bidVal (item 1 content)
-
-         let i 0
-         while [i < length currAuction] [
-           ifelse bidVal < item i currAuction [
-             let firstPart sublist currAuction 0 i
-             let secondPart sublist currAuction i length currAuction
-
-             set currAuction (sentence (sentence firstPart bidVal) secondPart)
-
-             set firstPart sublist currBuyers 0 i
-             set secondPart sublist currBuyers i length currBuyers;
-
-             set currBuyers (sentence (sentence firstPart sender) secondPart)
-
-             set highest-bids replace-item bid-item-pos highest-bids currAuction
-             set highest-bidders replace-item bid-item-pos highest-bidders currBuyers
-
-             set i length currAuction
-           ] [ set i i + 1 ]
+         if item bid-item-pos highest-bids > item 1 content [
+           set highest-bids replace-item bid-item-pos highest-bids (item 1 content)
+           set highest-bidders replace-item bid-item-pos highest-bidders sender
          ]
-         show highest-bids
-         show highest-bidders
-
-         ;if item bid-item-pos highest-bids > item 1 content [
-          ; set highest-bids replace-item bid-item-pos highest-bids (item 1 content)
-          ; set highest-bidders replace-item bid-item-pos highest-bidders sender
-         ;]
        ]
      ]
-   ]
 
-   ; CHECK IF IT IS EVEN TIME TO BID YET (Only bid when you receive your own bid)
-
-   let counter 0
-   let temp-highest-bidders highest-bidders
-   while [counter < length temp-highest-bidders] [
-
-
-     let currItem item counter temp-highest-bidders; highest-bidders highest
-     if currItem != false [
-
-       let bids-won []
-
-       let currIndex counter
-
-       while [currIndex != false][
-         set bids-won lput currIndex bids-won
-         set temp-highest-bidders replace-item currIndex temp-highest-bidders false
-         set currIndex position currItem temp-highest-bidders
-       ]
-       show currItem
-       show bids-won
-
-     ]
-     set counter counter + 1
-
-   ]
-
-   foreach requests [
-     broadcast-to ambulances add-content (list get-content ? distance-coords item 1 get-content ?) create-message "bid"
-   ]
-
-   if exist-beliefs-of-type "collect" and empty? intentions [
-       let bel closer beliefs-of-type "collect"
-       let coords item 1 bel
+     let bidPos position bidItem bid-items
+     ;show item bidPos highest-bids
+     ;show bidVal
+     if item bidPos highest-bids = bidVal [
        add-intention "pick-up-victim" "true"
-       if not at-dest coords [
-         add-intention (word "move-towards-dest " coords) (word "at-dest " coords)
+       if not at-dest bidItem [
+         add-intention (word "move-towards-dest " bidItem) (word "at-dest " bidItem)
+         broadcast-to ambulances add-content get-intention create-message "saving"
        ]
+     ]
+   ] [
+     ; got bids too early
+     foreach bids [
+       set incoming-queue lput ? incoming-queue
+     ]
+   ]
+
+   foreach bid-items  [
+     set attendedTasks lput (list (word "move-towards-dest " ?) (word "at-dest " ?)) attendedTasks
+   ]
+   show "SAllllllllllll"
+   ifelse exist-beliefs-of-type "collect" and empty? intentions [
+      show "s2"
+      let whitelist []
+
+      foreach beliefs [
+        let b ?
+
+        let match false
+        foreach attendedTasks [
+          if (list (word "move-towards-dest " item 1 b) (word "at-dest " item 1 b)) = ? [
+            set match true
+          ]
+        ]
+
+        if match = false [
+          set whitelist lput b whitelist
+        ]
+      ]
+
+      show whitelist
+
+      if length whitelist > 0 [
+        let bel closer filter [first ? = "collect"] whitelist
+        ;let bel closer beliefs-of-type "collect"
+        let coords item 1 bel
+        ;show "sedning a bid"
+
+        broadcast-to ambulances add-content (list coords distance-coords coords) create-message "bid"
+      ]
+    ] [
+      show "s1"
+      if not empty? intentions [
+        broadcast-to ambulances add-content get-intention create-message "saving"
+        show "SAVING"
+      ]
     ]
+    show "-------------------!"
 end
 
 
@@ -492,7 +500,7 @@ num-victims
 num-victims
 0
 100
-29
+32
 1
 1
 NIL
@@ -539,7 +547,7 @@ num-ambulances
 num-ambulances
 1
 10
-7
+4
 1
 1
 NIL
@@ -554,7 +562,7 @@ num-rescue-units
 num-rescue-units
 0
 30
-10
+16
 1
 1
 NIL
@@ -623,7 +631,7 @@ SWITCH
 356
 show-intentions
 show-intentions
-1
+0
 1
 -1000
 
