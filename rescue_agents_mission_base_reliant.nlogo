@@ -159,20 +159,13 @@ to collect-msg-update-intentions-unit
    [
      set msg get-message
      set performative get-performative msg
-     if performative = "request" [add-belief get-content msg]
-     if performative = "found" [
-       show "found"
-       show msg
-       show get-content msg
-       show beliefs
-       remove-belief get-content msg
-       show intentions
-       show beliefs
+     if performative = "request" [
+       add-belief get-content msg
+       set intentions []
      ]
-     if performative = "remove-intention" [
-       show get-intention
-       let intent-to-remove get-content msg
-       set intentions remove intent-to-remove intentions
+     if performative = "saved" [
+       remove-belief get-content msg
+       set intentions []
      ]
    ]
 
@@ -180,9 +173,10 @@ to collect-msg-update-intentions-unit
    if exist-beliefs-of-type "collect" and empty? intentions [
        let bel closer beliefs-of-type "collect"
        let coords item 1 bel
-       remove-belief bel
        add-intention "pick-up-victim" "true"
-       add-intention (word "move-towards-dest " coords) (word "at-dest " coords)
+       if not at-dest coords [
+         add-intention (word "move-towards-dest " coords) (word "at-dest " coords)
+       ]
     ]
 end
 
@@ -309,8 +303,7 @@ to pick-up-victim
    ask rescued-here [die]
    set picked-up picked-up + 1
    set load load + 1
-   broadcast-to ambulances add-content (list "collect" (list (round xcor) (round ycor))) create-message "found"
-   broadcast-to ambulances add-content intentions create-message "remove-intention"
+   broadcast-to ambulances add-content (list "collect" (list (round xcor) (round ycor))) create-message "saved"
 end
 
 ;;; Top level Reactive-traveling.
@@ -530,7 +523,7 @@ SWITCH
 356
 show-intentions
 show-intentions
-0
+1
 1
 -1000
 
@@ -541,7 +534,7 @@ SWITCH
 392
 show_messages
 show_messages
-0
+1
 1
 -1000
 
