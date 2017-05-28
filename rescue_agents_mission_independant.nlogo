@@ -8,7 +8,7 @@ breed [ bases base]
 breed [ ambulances ambulance]
 
 globals [rescued-cvls picked-up distance-traveled]
-ambulances-own [beliefs intentions incoming-queue load]
+ambulances-own [alive beliefs intentions incoming-queue load]
 bases-own [incoming-queue]
 
 ;;; Setting up the environment
@@ -53,6 +53,7 @@ end
 to setup-ambulances
    create-ambulances num-ambulances [
      rand-xy-co
+     set alive true
      set shape "abulance"
      set color red
      set beliefs []
@@ -136,9 +137,21 @@ end
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Hybrid Layer.
 to ambulance-behaviour
-   if reactive-ambulance-unit [stop]
-   collect-msg-update-intentions-unit
-   execute-intentions
+
+   if possibility-of-ambulance-breakdown [
+     if random ambulance-breakdown-chance = 0 [
+       set alive false
+       set color blue
+     ]
+   ]
+
+
+   if alive [
+     if reactive-ambulance-unit [stop]
+     collect-msg-update-intentions-unit
+     execute-intentions
+   ]
+
 end
 
 ;;; Reactive layer of ambulance Agent.
@@ -152,7 +165,6 @@ end
 
 ;;; Ambulance unit proactive behaviour
 to collect-msg-update-intentions-unit
-   show "!-------------------"
    let msg 0
    let performative 0
 
@@ -203,8 +215,6 @@ to collect-msg-update-intentions-unit
      send add-receiver who add-content ? create-message "second-saving"
    ]
 
-   show bids
-
    ifelse bidItem != false [
      foreach bids [
        let bid ?
@@ -248,9 +258,8 @@ to collect-msg-update-intentions-unit
    foreach bid-items  [
      set attendedTasks lput (list (word "move-towards-dest " ?) (word "at-dest " ?)) attendedTasks
    ]
-   show "SAllllllllllll"
+
    ifelse exist-beliefs-of-type "collect" and empty? intentions [
-      show "s2"
       let whitelist []
 
       foreach beliefs [
@@ -268,8 +277,6 @@ to collect-msg-update-intentions-unit
         ]
       ]
 
-      show whitelist
-
       if length whitelist > 0 [
         let bel closer filter [first ? = "collect"] whitelist
         ;let bel closer beliefs-of-type "collect"
@@ -279,13 +286,10 @@ to collect-msg-update-intentions-unit
         broadcast-to ambulances add-content (list coords distance-coords coords) create-message "bid"
       ]
     ] [
-      show "s1"
       if not empty? intentions [
         broadcast-to ambulances add-content get-intention create-message "saving"
-        show "SAVING"
       ]
     ]
-    show "-------------------!"
 end
 
 
@@ -631,7 +635,7 @@ SWITCH
 356
 show-intentions
 show-intentions
-0
+1
 1
 -1000
 
@@ -701,7 +705,33 @@ CHOOSER
 maximum_load
 maximum_load
 1 2 5 8 10
+0
+
+SLIDER
+99
+443
+430
+476
+ambulance-breakdown-chance
+ambulance-breakdown-chance
+0
+100000
+1000
+500
 1
+NIL
+HORIZONTAL
+
+SWITCH
+116
+402
+429
+435
+possibility-of-ambulance-breakdown
+possibility-of-ambulance-breakdown
+0
+1
+-1000
 
 @#$#@#$#@
 Rescue Agents
