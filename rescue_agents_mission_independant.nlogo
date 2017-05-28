@@ -93,44 +93,6 @@ to run-rescue
    tick
 end
 
-
-
-
-
-
-
-
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-to base-behaviour
-   let msg 0
-   let performative 0
-
-   while [not empty? incoming-queue]
-   [
-      set msg get-message
-      set performative get-performative msg
-      if performative = "inform" [allocate-the-rescue msg]
-   ]
-end
-
-to allocate-the-rescue [msg]
-   let coords (item 1 get-content msg)
-   broadcast-to ambulances add-content (list "collect" coords) create-message "request"
-end
-
-
-
-
-
-
-
-
-
-
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;
 ;;; Ambulance Agent
@@ -138,6 +100,9 @@ end
 ;;; Hybrid Layer.
 to ambulance-behaviour
 
+   ;;; In a real world situation, problems are likely to occur. To simulate an
+   ;;; ambulance breaking down (losing all communication with the other vehicles
+   ;;; I have added this condition (control the behaviour using the sliders)
    if possibility-of-ambulance-breakdown [
      if random ambulance-breakdown-chance = 0 [
        set alive false
@@ -145,7 +110,7 @@ to ambulance-behaviour
      ]
    ]
 
-
+   ;;; If the ambulance has not broken down (if it is alive), go and do your ambulance duties
    if alive [
      if reactive-ambulance-unit [stop]
      collect-msg-update-intentions-unit
@@ -188,10 +153,20 @@ to collect-msg-update-intentions-unit
      if performative = "request" [
 ;       set requests lput msg requests
        add-belief get-content msg
-;       set intentions []
+       show item 1 get-content msg
+       if item 1 get-content msg = item 1 closer beliefs [
+         set intentions []
+       ]
      ]
      if performative = "saved" [
        remove-belief get-content msg
+       let coords item 1 get-content msg
+       if not empty? intentions [
+         if get-intention = (list (word "move-towards-dest " coords) (word "at-dest " coords)) [
+           set intentions []
+         ]
+       ]
+
        ;set intentions []
      ]
      if performative = "bid" [
@@ -290,9 +265,11 @@ to collect-msg-update-intentions-unit
         broadcast-to ambulances add-content get-intention create-message "saving"
       ]
     ]
+
+  if empty? intentions [
+    move-randomly
+  ]
 end
-
-
 
 ;;; Reports the closest item in list.
 ;;; This reports the closer to the agent item from a list of items. The coordinates of the
@@ -308,14 +285,6 @@ to-report closer [itemlist]
    report closest
 end
 
-
-
-
-
-
-
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Rescue Units
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -329,18 +298,9 @@ end
 ;;; creates a message for the location of the victim, where the content is
 ;;; "victim-at" [xcor ycor]
 to inform-base
-   send add-receiver base-id add-content (list "victim-at" (list (round xcor) (round ycor))) create-message "inform"
+   broadcast-to ambulances add-content (list "collect" (list (round xcor) (round ycor))) create-message "request"
+   ;send add-receiver base-id add-content (list "victim-at" (list (round xcor) (round ycor))) create-message "inform"
 end
-
-
-
-
-
-
-
-
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;; Sensors
@@ -504,7 +464,7 @@ num-victims
 num-victims
 0
 100
-32
+50
 1
 1
 NIL
@@ -536,7 +496,7 @@ num-obstacles
 num-obstacles
 0
 50
-31
+30
 1
 1
 NIL
@@ -551,7 +511,7 @@ num-ambulances
 num-ambulances
 1
 10
-4
+6
 1
 1
 NIL
@@ -566,7 +526,7 @@ num-rescue-units
 num-rescue-units
 0
 30
-16
+10
 1
 1
 NIL
@@ -705,7 +665,7 @@ CHOOSER
 maximum_load
 maximum_load
 1 2 5 8 10
-0
+1
 
 SLIDER
 99
@@ -716,7 +676,7 @@ ambulance-breakdown-chance
 ambulance-breakdown-chance
 0
 100000
-1000
+2000
 500
 1
 NIL
