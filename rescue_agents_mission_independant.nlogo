@@ -60,7 +60,7 @@ to setup-ambulances
      set intentions []
      set incoming-queue []
      set load 0
-     add-intention "do-nothing" timeout_expired 30
+     ;add-intention "do-nothing" timeout_expired 30
    ]
 end
 ;;; creating Rescue units
@@ -87,7 +87,6 @@ end
 ;;;; Experiment
 to run-rescue
    if count civilians = 0 and count rescued = 0 [stop]
-   ask bases [base-behaviour]
    ask ambulances [ambulance-behaviour]
    ask rescue-units [rescue-unit-behaviour]
    tick
@@ -101,7 +100,7 @@ end
 to ambulance-behaviour
 
    ;;; In a real world situation, problems are likely to occur. To simulate an
-   ;;; ambulance breaking down (losing all communication with the other vehicles
+   ;;; ambulance breaking down (making them lose all communication with the other vehicles)
    ;;; I have added this condition (control the behaviour using the sliders)
    if possibility-of-ambulance-breakdown [
      if random ambulance-breakdown-chance = 0 [
@@ -133,31 +132,42 @@ to collect-msg-update-intentions-unit
    let msg 0
    let performative 0
 
-   let requests []
+   let attendedTasks [] ;; a list of all tasks that are being tended to
+   let firstAttendedTasks [] ;; a subset of attendedTasks consisting only of tasks that have only been viewed once
 
-   let attendedTasks []
-   let firstAttendedTasks []
+   let bids [] ;; a list of all bids
+   let bid-items [] ;; the coord on which bidding occured
+   let highest-bids [] ;; the values of the highest (winning) bids
+   let highest-bidders [] ;; A list of the highest bidders for particular auctions
 
-   let bids []
-   let bid-items []
-   let highest-bids []
-   let highest-bidders []
+   let bidItem false ;; The Item on which the current ambulance has bid on
+   let bidVal false ;; The Value of the current ambulances bid
 
-   let bidItem false
-   let bidVal false
+   ;; This variable will only get set if there is a new civilian that has been found that is closer than the civilian that
+   ;; is currently being looked for. If this flag is set (to the coords of the closer civilian) then the agent will bid
+   ;; will keeping on going to its currently selected civilian. Only if it wins the bid does it actually change its intentions
+   let closerItem false
 
+   ;; loop through the incoming queue
    while [not empty? incoming-queue]
    [
-     set msg get-message
-     set performative get-performative msg
+     set msg get-message ;; pop message from the queue
+     set performative get-performative msg ;; get the performative from the message
+
+     ;; A request is a message that is broadcasted by a rescue agent when that agent finds a
+     ;; civilian. If a civilian is found and that civilian is the closest civilian to the agent
+     ;; he should make a bid.
      if performative = "request" [
-;       set requests lput msg requests
        add-belief get-content msg
        show item 1 get-content msg
        if item 1 get-content msg = item 1 closer beliefs [
-         set intentions []
+         set closerItem item 1 get-content msg
+         ;; set intentions [] ;this should be where the bid is made since the bid will be made, change to just be a flag
        ]
      ]
+
+     ;; If a victim has been saved by a different ambulance, then this ambulance should remove the beliefs
+     ;; and possibly intentions if the intentions are for the same coord
      if performative = "saved" [
        remove-belief get-content msg
        let coords item 1 get-content msg
@@ -166,9 +176,10 @@ to collect-msg-update-intentions-unit
            set intentions []
          ]
        ]
-
-       ;set intentions []
      ]
+
+     ;; if a bid has arrived, add it to the list of arrived bids, if the bid is from yourself,
+     ;; save it into a variable (later we must compare our own bid to all of the other bids)
      if performative = "bid" [
        set bids lput msg bids
 
@@ -177,35 +188,60 @@ to collect-msg-update-intentions-unit
          set bidVal item 1 get-content msg
        ]
      ]
+
+     ;; This performative lets the ambulance know that someone else is already saving a specific person.
+     ;; Also saves the message and later will repost it with the second-saving performative. This is because
+     ;; the order in which ambulances do their task in a tick may change so you need atleast 2 ticks to be sure
+     ;; that you have received all messages.
      if performative = "saving" [
        set attendedTasks lput get-content msg attendedTasks
        set firstAttendedTasks lput get-content msg firstAttendedTasks
      ]
+
+     ;; This performative lets the ambulance know that someone else is already saving a specific person.
+     ;; It does not add a new message.
      if performative = "second-saving" [
        set attendedTasks lput get-content msg attendedTasks
      ]
    ]
 
+   ;; for each 'saving' message received send a message to yourself saying that someone is saveing a certain co-ord.
+   ;; This is so that the 'saving' message stays around for the next tick, even if the order of which ambulances
+   ;; execute tasks when can change
    foreach firstAttendedTasks [
      send add-receiver who add-content ? create-message "second-saving"
    ]
 
-   ifelse bidItem != false [
+   ;; if a bidItem was found, it means that you have cast a bid and everyone else must have bidded
+   ;; already too. In this case you should find the winning bids and see if you have won.
+   ;; Checking if the bidItem is not already taken by another ambulance prevents unnecessary computation and
+   ;; stops ambulances which are the same distance away from a civilian going together to get the same civilian
+   ifelse (bidItem != false) and not (member? bidItem attendedTasks) [
      foreach bids [
        let bid ?
 
-       let content get-content bid
-       let bid-item first content
-       let bid-item-pos position bid-item bid-items
-       let sender get-sender bid
+       let content get-content bid ;; the full content of the bid [coords, distance]
+       let bid-item first content ;; the coords that are being bid on
 
+       let bid-item-pos position bid-item bid-items ;; the position inside bid-items of the current auction for coords.
+       let sender get-sender bid ;; the sender of the bid
+
+       ;; if bid-item-pos = false, no auction for the specific coords has been started.
        ifelse bid-item-pos = false [
+         ;; start the auction by adding the bid-item to the end of the list of bid-items. This will make the position
+         ;; of the bid-item be the last index of bid-items
          set bid-items lput bid-item bid-items
          set bid-item-pos (length bid-items) - 1
 
+         ;; since this is the first bid in the auction, we set it to be the highest bid. Assign the value of the
+         ;; highest bidder for the auction to be the sender of the bid
          set highest-bids lput item 1 content highest-bids
          set highest-bidders lput sender highest-bidders
+
        ] [
+         ;; we want the closest position to a set of coords so the highest bid is actually the bid with the lowest value
+         ;; (the smallest distance). Check if the current bid-item's distance is less then the current highest bid.
+         ;; If so, update the highest bid to be the current bid value and the highest bidder to the sender of the bid
          if item bid-item-pos highest-bids > item 1 content [
            set highest-bids replace-item bid-item-pos highest-bids (item 1 content)
            set highest-bidders replace-item bid-item-pos highest-bidders sender
@@ -213,62 +249,91 @@ to collect-msg-update-intentions-unit
        ]
      ]
 
+     ;; get the position of the auction that we actually care about (the auction that we bidded on)
      let bidPos position bidItem bid-items
-     ;show item bidPos highest-bids
-     ;show bidVal
+
+     ;; if the value that we bid for this auction is the same as the highest bid, it means that we have won the bid.
+     ;; The ambulance should set our intentions to be for the current coordinates and let the other ambulances know that
+     ;; it is going after the specific person. If two ambulances had the same bid, the one that sends the 'saving' message first
+     ;; will pick up the victim.
      if item bidPos highest-bids = bidVal [
+       set intentions []
        add-intention "pick-up-victim" "true"
        if not at-dest bidItem [
          add-intention (word "move-towards-dest " bidItem) (word "at-dest " bidItem)
          broadcast-to ambulances add-content get-intention create-message "saving"
        ]
      ]
-   ] [
-     ; got bids too early
+   ]
+   [
+     ;; Even though you haven't bidded yet, others may have already cast their bid. we have to make sure
+     ;; that when we compare bids (when the agent's own bid comes back) that we also include bids that
+     ;; happened before the agent cast its bid
      foreach bids [
        set incoming-queue lput ? incoming-queue
      ]
    ]
 
+   ; all items that were bidded on which weren't won by the current agent can be assumed to be attendedTasks
+   ; since bidding is a one round process with a definative winner for each auction
    foreach bid-items  [
      set attendedTasks lput (list (word "move-towards-dest " ?) (word "at-dest " ?)) attendedTasks
    ]
 
-   ifelse exist-beliefs-of-type "collect" and empty? intentions [
-      let whitelist []
+   ifelse closerItem != false [
+     ;; if closerItem is set, it means that although the ambulance has intentions, there is a civilian which is closer
+     ;; to the ambulance than the civilian we are currently chasing. If this is the case then we should cast a bid on that item.
+     broadcast-to ambulances add-content (list closerItem distance-coords closerItem) create-message "bid"
+   ] [
+     ;; check if there are any civilians whos locations we know of. If we don't have intentions we should bid on one of these
+     ;; civilians so long as nobody else is already going to collect the civilian.
+     if exist-beliefs-of-type "collect" and empty? intentions [
 
-      foreach beliefs [
-        let b ?
+       ;; -------------------------------------------------------------------------------------------
+       ;; Create whitelist of all coords which are available for the ambulance to go to
+       let whitelist []
+       foreach beliefs [
+         let b ?
 
-        let match false
-        foreach attendedTasks [
-          if (list (word "move-towards-dest " item 1 b) (word "at-dest " item 1 b)) = ? [
-            set match true
-          ]
-        ]
+         let match false
+         foreach attendedTasks [
+           if (list (word "move-towards-dest " item 1 b) (word "at-dest " item 1 b)) = ? [
+             set match true
+           ]
+         ]
 
-        if match = false [
-          set whitelist lput b whitelist
-        ]
-      ]
+         if match = false [
+           set whitelist lput b whitelist
+         ]
+       ]
+       ;; -------------------------------------------------------------------------------------------
 
-      if length whitelist > 0 [
-        let bel closer filter [first ? = "collect"] whitelist
-        ;let bel closer beliefs-of-type "collect"
-        let coords item 1 bel
-        ;show "sedning a bid"
+       ;; if the whitelist is not empty it means that there are un-assigned tasks. We should bid on one of these
+       if length whitelist > 0 [
 
-        broadcast-to ambulances add-content (list coords distance-coords coords) create-message "bid"
-      ]
-    ] [
-      if not empty? intentions [
-        broadcast-to ambulances add-content get-intention create-message "saving"
-      ]
-    ]
+         ;; find the closest belief in the whitelist
+         let bel closer filter [first ? = "collect"] whitelist
+         let coords item 1 bel
 
-  if empty? intentions [
-    move-randomly
-  ]
+         ;; cast a bid for the belief
+         broadcast-to ambulances add-content (list coords distance-coords coords) create-message "bid"
+       ]
+     ]
+   ]
+
+   ifelse not empty? intentions [
+     ;; if we have intentions, broadcast these using performative saving. saving only cares about
+     ;; intentions that are about saving a person so even if other intentions are sent it doesn't
+     ;; matter (these other intentions will be ignored)
+     broadcast-to ambulances add-content get-intention create-message "saving"
+   ] [
+     ;; If an ambulance has nothing to do, it is very time inefficiant to just sit and do nothing.
+     ;; so in order to not waste time, when there are no tasks for the ambulances to do, they will
+     ;; move-randomly with the rest of the rescue agents helping them search for victims. This also
+     ;; prevents the problem where sometimes and ambulance will have not intentions after returning
+     ;; to the base, so it will just sit and do nothing, blocking other ambulances from using the base.
+     move-randomly
+   ]
 end
 
 ;;; Reports the closest item in list.
@@ -299,7 +364,6 @@ end
 ;;; "victim-at" [xcor ycor]
 to inform-base
    broadcast-to ambulances add-content (list "collect" (list (round xcor) (round ycor))) create-message "request"
-   ;send add-receiver base-id add-content (list "victim-at" (list (round xcor) (round ycor))) create-message "inform"
 end
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -511,7 +575,7 @@ num-ambulances
 num-ambulances
 1
 10
-6
+2
 1
 1
 NIL
@@ -595,7 +659,7 @@ SWITCH
 356
 show-intentions
 show-intentions
-1
+0
 1
 -1000
 
@@ -676,7 +740,7 @@ ambulance-breakdown-chance
 ambulance-breakdown-chance
 0
 100000
-2000
+4500
 500
 1
 NIL
@@ -689,7 +753,7 @@ SWITCH
 435
 possibility-of-ambulance-breakdown
 possibility-of-ambulance-breakdown
-0
+1
 1
 -1000
 
